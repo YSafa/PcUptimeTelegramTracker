@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Hosting;
 using PcUptimeTelegramTracker.Worker.Models;
 using PcUptimeTelegramTracker.Worker.Services;
+using PcUptimeTelegramTracker.Worker.Storage;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddSingleton<UptimeTrackerService>();
+builder.Services.AddSingleton<SessionStateStore>();
 
 // appsettings.Local.json overrides values in appsettings.json.
 // This file is in .gitignore, so it never gets committed — only exists locally.

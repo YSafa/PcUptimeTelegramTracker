@@ -161,6 +161,69 @@ public class UptimeTrackerService : IDisposable
 
         return $"*[System[({idFilter}) and {timeFilter}]]";
     }
+    
+    // Reconstructs the most recently completed session (boot -> shutdown/crash)
+    // that happened before the current boot, using event log history.
+    public SessionSummary? DetermineLastCompletedSession()
+    {
+        var lookbackStart = DateTime.Now.AddDays(-30);
+        var events = ReadEventsSince(lookbackStart).ToList();
+
+        var currentBootIndex = -1;
+        for (var i = events.Count - 1; i >= 0; i--)
+        {
+            if (events[i].EventId == 6005) { currentBootIndex = i; break; }
+        }
+        // No boot event found, or this is the very first recorded boot — nothing to report.
+        if (currentBootIndex <= 0) return null;
+
+        var sessionEndEvent = events[currentBootIndex - 1];
+        var sessionEndTime = sessionEndEvent.Timestamp;
+        var endedCleanly = sessionEndEvent.EventId is 6006 or 1074;
+
+        var startIndex = -1;
+        for (var i = currentBootIndex - 1; i >= 0; i--)
+        {
+            if (events[i].EventId == 6005) { startIndex = i; break; }
+        }
+        if (startIndex == -1) return null;
+
+        var sessionStartTime = events[startIndex].Timestamp;
+
+        var awake = TimeSpan.Zero;
+        var asleep = TimeSpan.Zero;
+        var state = PowerState.Awake;
+        var lastTime = sessionStartTime;
+
+        for (var i = startIndex; i < currentBootIndex; i++)
+        {
+            var (timestamp, eventId) = events[i];
+            if (eventId is not (42 or 1)) continue;
+
+            var elapsed = timestamp - lastTime;
+            if (elapsed > TimeSpan.Zero)
+            {
+                if (state == PowerState.Awake) awake += elapsed; else asleep += elapsed;
+            }
+            state = eventId == 42 ? PowerState.Asleep : PowerState.Awake;
+            lastTime = timestamp;
+        }
+
+        var remaining = sessionEndTime - lastTime;
+        if (remaining > TimeSpan.Zero)
+        {
+            if (state == PowerState.Awake) awake += remaining; else asleep += remaining;
+        }
+
+        return new SessionSummary
+        {
+            StartTime = sessionStartTime,
+            EndTime = sessionEndTime,
+            AwakeDuration = awake,
+            SleepDuration = asleep,
+            EndedCleanly = endedCleanly
+        };
+    }
 
     public void Dispose()
     {
