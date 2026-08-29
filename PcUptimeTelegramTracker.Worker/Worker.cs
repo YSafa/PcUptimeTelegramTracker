@@ -40,15 +40,15 @@ public class Worker : BackgroundService
         var lastReported = _sessionStateStore.GetLastReportedSessionEnd();
         if (lastReported.HasValue && session.EndTime <= lastReported.Value)
         {
-            // Already reported this session, nothing new to send.
             return;
         }
 
-        // Placeholder message format — will be refined later.
         var status = session.EndedCleanly ? "" : " (beklenmedik şekilde sonlandı)";
         var message =
-            $"Önceki oturum{status}: {session.TotalDuration:hh\\:mm} açık kaldı " +
-            $"(Uyanık: {session.AwakeDuration:hh\\:mm}, Uykuda: {session.SleepDuration:hh\\:mm})";
+            $"Önceki oturum{status}\n" +
+            $"{session.StartTime:dd.MM.yyyy HH:mm:ss} - {session.EndTime:dd.MM.yyyy HH:mm:ss} arası açık kaldı " +
+            $"(toplam {session.TotalDuration:hh\\:mm\\:ss})\n" +
+            $"Uyanık: {session.AwakeDuration:hh\\:mm\\:ss}, Uykuda: {session.SleepDuration:hh\\:mm\\:ss}";
 
         await _telegramNotifier.SendMessageAsync(message, cancellationToken);
         _sessionStateStore.SetLastReportedSessionEnd(session.EndTime);

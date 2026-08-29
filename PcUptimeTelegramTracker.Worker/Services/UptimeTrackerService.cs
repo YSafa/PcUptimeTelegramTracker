@@ -15,9 +15,25 @@ public class UptimeTrackerService : IDisposable
 {
     private const string SystemLogChannel = "System";
 
-    // Kernel-Power: 42 = entering sleep, 1 = resumed from sleep, 41 = unexpected shutdown/reboot.
-    // EventLog: 6005 = system started (clean boot), 6006 = clean shutdown.
-    private static readonly int[] RelevantEventIds = { 42, 1, 41, 6005, 6006 };
+    // (EventID, Provider) pairs we care about. We filter by provider too,
+    // because event IDs are not unique across providers within the System log
+    // (e.g. ID 27 also exists under an unrelated Eventlog-channel-init source).
+    //
+    // 42/1/41  -> Kernel-Power: sleep, resume, unexpected shutdown.
+    // 27       -> Kernel-Boot: system boot, fired for ANY boot type
+    //             (cold boot, Fast Startup, resume-from-hibernate) — unlike
+    //             6005, which Fast Startup can skip entirely.
+    // 1074     -> User32: user clicked Shut down/Restart. Fired at click time,
+    //             before any hibernation write, so it's reliable even with
+    //             Fast Startup enabled — unlike 6006.
+    private static readonly (int EventId, string Provider)[] RelevantEvents =
+    {
+        (42, "Microsoft-Windows-Kernel-Power"),
+        (1, "Microsoft-Windows-Kernel-Power"),
+        (41, "Microsoft-Windows-Kernel-Power"),
+        (27, "Microsoft-Windows-Kernel-Boot"),
+        (1074, "USER32")
+    };
 
     private readonly ILogger<UptimeTrackerService> _logger;
     private readonly DailyUsageSummary _summary = new();
@@ -39,13 +55,10 @@ public class UptimeTrackerService : IDisposable
     {
         var todayStart = DateTime.Today;
 
-        // First, find the state we were in right before midnight, so we know
-        // what to assume if the machine was already awake/asleep at day start.
         var stateBeforeToday = FindMostRecentStateBefore(todayStart);
         _currentState = stateBeforeToday;
         _lastTransitionTime = todayStart;
 
-        // Then walk through everything that happened since midnight.
         foreach (var (timestamp, eventId) in ReadEventsSince(todayStart))
         {
             ApplyTransition(timestamp, eventId);
@@ -79,7 +92,6 @@ public class UptimeTrackerService : IDisposable
 
     private void ApplyTransition(DateTime timestamp, int eventId)
     {
-        // Accumulate the duration of the state we were in until this event.
         var elapsed = timestamp - _lastTransitionTime;
         if (elapsed > TimeSpan.Zero)
         {
@@ -91,28 +103,20 @@ public class UptimeTrackerService : IDisposable
             }
         }
 
-        var previousState = _currentState;
-
-        // Determine the new state based on the event that just occurred.
         _currentState = eventId switch
         {
-            42 => PowerState.Asleep,           // going to sleep
-            1 or 6005 => PowerState.Awake,      // resumed or clean boot
-            41 => PowerState.Unknown,           // unexpected shutdown — unclear what happened next
-            6006 => PowerState.Unknown,         // clean shutdown — service isn't running to observe more anyway
+            42 => PowerState.Asleep,     // entering sleep
+            1 => PowerState.Awake,        // resumed from sleep
+            27 => PowerState.Awake,       // system booted (any boot type)
+            41 => PowerState.Unknown,     // unexpected shutdown
+            1074 => PowerState.Unknown,   // user-initiated shutdown/restart
             _ => _currentState
         };
         _lastTransitionTime = timestamp;
-
-        // Temporary — remove once we've confirmed live watching works correctly.
-       /* _logger.LogInformation(
-            "Durum değişti: EventID={EventId}, {Previous} -> {New}, Geçen süre: {Elapsed}",
-            eventId, previousState, _currentState, elapsed);*/
     }
 
     private PowerState FindMostRecentStateBefore(DateTime cutoff)
     {
-        // Look back up to 7 days for the last relevant event before "cutoff".
         var lookbackStart = cutoff.AddDays(-7);
         var query = BuildQuery(lookbackStart, cutoff);
         var eventLogQuery = new EventLogQuery(SystemLogChannel, PathType.LogName, query) { ReverseDirection = true };
@@ -124,7 +128,7 @@ public class UptimeTrackerService : IDisposable
         return record.Id switch
         {
             42 => PowerState.Asleep,
-            1 or 6005 => PowerState.Awake,
+            1 or 27 => PowerState.Awake,
             _ => PowerState.Unknown
         };
     }
@@ -143,14 +147,16 @@ public class UptimeTrackerService : IDisposable
                 results.Add((record.TimeCreated.Value, record.Id));
         }
 
-        // EventLogReader already returns events in chronological order by default
-        // (ReverseDirection defaults to false), so no reversal is needed here.
+        // EventLogReader returns events in chronological order by default
+        // (ReverseDirection defaults to false) — no reversal needed.
         return results;
     }
 
     private string BuildQuery(DateTime from, DateTime? to = null)
     {
-        var idFilter = string.Join(" or ", RelevantEventIds.Select(id => $"EventID={id}"));
+        var idFilter = string.Join(" or ",
+            RelevantEvents.Select(e => $"(Provider[@Name='{e.Provider}'] and EventID={e.EventId})"));
+
         var fromUtc = from.ToUniversalTime().ToString("o");
         var timeFilter = $"TimeCreated[@SystemTime>='{fromUtc}'";
         if (to.HasValue)
@@ -161,7 +167,7 @@ public class UptimeTrackerService : IDisposable
 
         return $"*[System[({idFilter}) and {timeFilter}]]";
     }
-    
+
     // Reconstructs the most recently completed session (boot -> shutdown/crash)
     // that happened before the current boot, using event log history.
     public SessionSummary? DetermineLastCompletedSession()
@@ -172,19 +178,18 @@ public class UptimeTrackerService : IDisposable
         var currentBootIndex = -1;
         for (var i = events.Count - 1; i >= 0; i--)
         {
-            if (events[i].EventId == 6005) { currentBootIndex = i; break; }
+            if (events[i].EventId == 27) { currentBootIndex = i; break; }
         }
-        // No boot event found, or this is the very first recorded boot — nothing to report.
         if (currentBootIndex <= 0) return null;
 
         var sessionEndEvent = events[currentBootIndex - 1];
         var sessionEndTime = sessionEndEvent.Timestamp;
-        var endedCleanly = sessionEndEvent.EventId is 6006 or 1074;
+        var endedCleanly = sessionEndEvent.EventId == 1074;
 
         var startIndex = -1;
         for (var i = currentBootIndex - 1; i >= 0; i--)
         {
-            if (events[i].EventId == 6005) { startIndex = i; break; }
+            if (events[i].EventId == 27) { startIndex = i; break; }
         }
         if (startIndex == -1) return null;
 
