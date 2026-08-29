@@ -184,7 +184,11 @@ public class UptimeTrackerService : IDisposable
 
         var sessionEndEvent = events[currentBootIndex - 1];
         var sessionEndTime = sessionEndEvent.Timestamp;
-        var endedCleanly = sessionEndEvent.EventId == 1074;
+        
+        // Only a genuine EventID 41 (Kernel-Power unexpected shutdown) counts as "unclean".
+        // Both 1074 (user clicked shut down/restart) and 42 (Fast Startup's hybrid
+        // shutdown enters a sleep-like state as its final logged step) are normal endings.
+        var endedCleanly = sessionEndEvent.EventId != 41;
 
         var startIndex = -1;
         for (var i = currentBootIndex - 1; i >= 0; i--)
