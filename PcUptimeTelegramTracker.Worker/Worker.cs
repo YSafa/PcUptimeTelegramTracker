@@ -1,17 +1,18 @@
-namespace PcUptimeTelegramTracker.Worker;
-
-public class Worker(ILogger<Worker> logger) : BackgroundService
+public class Worker : BackgroundService
 {
+    private readonly ILogger<Worker> _logger;
+
+    public Worker(ILogger<Worker> logger)
+    {
+        _logger = logger;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            if (logger.IsEnabled(LogLevel.Information))
-            {
-                logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
-            }
+        _logger.LogInformation("PcUptimeTelegramTracker başlatıldı.");
 
-            await Task.Delay(1000, stoppingToken);
-        }
+        // EventLogWatcher subscription will be added here later.
+        // For now, the service just stays alive.
+        await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 }
