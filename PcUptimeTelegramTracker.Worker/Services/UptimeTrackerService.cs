@@ -91,6 +91,8 @@ public class UptimeTrackerService : IDisposable
             }
         }
 
+        var previousState = _currentState;
+
         // Determine the new state based on the event that just occurred.
         _currentState = eventId switch
         {
@@ -101,6 +103,11 @@ public class UptimeTrackerService : IDisposable
             _ => _currentState
         };
         _lastTransitionTime = timestamp;
+
+        // Temporary — remove once we've confirmed live watching works correctly.
+       /* _logger.LogInformation(
+            "Durum değişti: EventID={EventId}, {Previous} -> {New}, Geçen süre: {Elapsed}",
+            eventId, previousState, _currentState, elapsed);*/
     }
 
     private PowerState FindMostRecentStateBefore(DateTime cutoff)
@@ -136,8 +143,8 @@ public class UptimeTrackerService : IDisposable
                 results.Add((record.TimeCreated.Value, record.Id));
         }
 
-        // EventLogReader reads newest-first by default; we need chronological order.
-        results.Reverse();
+        // EventLogReader already returns events in chronological order by default
+        // (ReverseDirection defaults to false), so no reversal is needed here.
         return results;
     }
 
