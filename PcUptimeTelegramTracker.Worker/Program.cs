@@ -4,6 +4,8 @@ using PcUptimeTelegramTracker.Worker.Services;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.Services.AddSingleton<UptimeTrackerService>();
+
 // appsettings.Local.json overrides values in appsettings.json.
 // This file is in .gitignore, so it never gets committed — only exists locally.
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
