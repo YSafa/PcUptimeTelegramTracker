@@ -61,18 +61,21 @@ public class WeeklyReportService
         var totalSampledSeconds = totalSamples * 60.0 * Environment.ProcessorCount;
 
         var message =
-            $"Haftalık özet ({cutoff:dd.MM.yyyy} - {DateTime.Now:dd.MM.yyyy})\n" +
-            $"{sessionCount} oturum, toplam {awake + sleep:hh\\:mm\\:ss} açık kaldı\n" +
-            $"Uyanık: {awake:hh\\:mm\\:ss}, Uykuda: {sleep:hh\\:mm\\:ss}";
+            $"📈 Haftalık Özet\n" +
+            $"🗓️ {cutoff:dd.MM.yyyy} → {DateTime.Now:dd.MM.yyyy}\n" +
+            $"🔢 {sessionCount} oturum\n" +
+            $"⏱️ Toplam açık kalma: {DurationFormatter.Format(awake + sleep)}\n" +
+            $"🟢 Uyanık: {DurationFormatter.Format(awake)}\n" +
+            $"🌙 Uykuda: {DurationFormatter.Format(sleep)}";
 
         if (topApps.Count > 0 && totalSampledSeconds > 0)
         {
-            message += "\n\nEn çok kaynak tüketen uygulamalar:\n" +
-                string.Join("\n", topApps.Select((app, i) =>
-                {
-                    var avgPercent = (app.CpuTime.TotalSeconds / totalSampledSeconds) * 100;
-                    return $"{i + 1}. {app.ProcessName} — {app.CpuTime:hh\\:mm\\:ss} (ort. %{avgPercent:0.0})";
-                }));
+            message += "\n\n🔥 En çok kaynak tüketen uygulamalar:\n" +
+                       string.Join("\n", topApps.Select((app, i) =>
+                       {
+                           var avgPercent = (app.CpuTime.TotalSeconds / totalSampledSeconds) * 100;
+                           return $"{i + 1}. {app.ProcessName} — {DurationFormatter.Format(app.CpuTime)} (ort. %{avgPercent:0.0})";
+                       }));
         }
 
         await _telegramNotifier.SendMessageAsync(message, cancellationToken);

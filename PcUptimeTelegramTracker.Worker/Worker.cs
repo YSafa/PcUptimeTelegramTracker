@@ -62,6 +62,42 @@ public class Worker : BackgroundService
 
     private async Task ReportPreviousSessionIfNeeded(CancellationToken cancellationToken)
     {
-        // ... existing content, unchanged ...
+        var session = _uptimeTracker.DetermineLastCompletedSession();
+        if (session is null) return;
+
+        var lastReported = _sessionStateStore.GetLastReportedSessionEnd();
+        if (lastReported.HasValue && session.EndTime <= lastReported.Value)
+        {
+            return;
+        }
+
+        _usageRepository.SaveSession(
+            session.StartTime, session.EndTime, session.AwakeDuration, session.SleepDuration, session.EndedCleanly);
+
+        var topApps = _usageRepository.GetTopApps(session.StartTime, 5);
+        var sampleCount = _usageRepository.GetSampleCount(session.StartTime);
+        var totalSampledSeconds = sampleCount * 60.0 * Environment.ProcessorCount;
+
+        var statusLine = session.EndedCleanly ? "" : "\n⚠️ Beklenmedik şekilde sonlandı";
+
+        var message =
+            $"💻 Önceki Oturum Özeti{statusLine}\n" +
+            $"🕐 {session.StartTime:dd.MM.yyyy HH:mm:ss} → {session.EndTime:dd.MM.yyyy HH:mm:ss}\n" +
+            $"⏱️ Toplam: {DurationFormatter.Format(session.TotalDuration)}\n" +
+            $"🟢 Uyanık: {DurationFormatter.Format(session.AwakeDuration)}\n" +
+            $"🌙 Uykuda: {DurationFormatter.Format(session.SleepDuration)}";
+
+        if (topApps.Count > 0 && totalSampledSeconds > 0)
+        {
+            message += "\n\n🔥 En çok kaynak tüketen uygulamalar:\n" +
+                       string.Join("\n", topApps.Select((app, i) =>
+                       {
+                           var avgPercent = (app.CpuTime.TotalSeconds / totalSampledSeconds) * 100;
+                           return $"{i + 1}. {app.ProcessName} — {DurationFormatter.Format(app.CpuTime)} (ort. %{avgPercent:0.0})";
+                       }));
+        }
+
+        await _telegramNotifier.SendMessageAsync(message, cancellationToken);
+        _sessionStateStore.SetLastReportedSessionEnd(session.EndTime);
     }
 }
