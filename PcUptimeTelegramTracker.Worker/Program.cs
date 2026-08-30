@@ -10,6 +10,7 @@ builder.Services.AddSingleton<SessionStateStore>();
 builder.Services.AddSingleton<ProcessUsageCollector>();
 builder.Services.AddSingleton<UsageRepository>();
 builder.Services.AddSingleton<ProcessUsageCollector>();
+builder.Services.AddSingleton<WeeklyReportService>();
 
 // appsettings.Local.json overrides values in appsettings.json.
 // This file is in .gitignore, so it never gets committed — only exists locally.

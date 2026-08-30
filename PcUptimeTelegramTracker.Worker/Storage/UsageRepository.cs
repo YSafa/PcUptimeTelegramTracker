@@ -150,6 +150,69 @@ public class UsageRepository
         command.ExecuteNonQuery();
     }
 
+    
+    
+    public (int SessionCount, TimeSpan Awake, TimeSpan Sleep) GetSessionsSummarySince(DateTime cutoff)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), COALESCE(SUM(AwakeSeconds), 0), COALESCE(SUM(SleepSeconds), 0)
+            FROM Sessions
+            WHERE StartTime >= $cutoff;
+            """;
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("o"));
+
+        using var reader = command.ExecuteReader();
+        if (reader.Read())
+        {
+            return (reader.GetInt32(0), TimeSpan.FromSeconds(reader.GetInt64(1)), TimeSpan.FromSeconds(reader.GetInt64(2)));
+        }
+        return (0, TimeSpan.Zero, TimeSpan.Zero);
+    }
+
+    public List<(string ProcessName, TimeSpan CpuTime)> GetTopAppsSince(DateTime cutoff, int count)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT ProcessName, SUM(CpuTimeTicks) AS Total
+            FROM AppUsage
+            WHERE SessionStartTime >= $cutoff
+            GROUP BY ProcessName
+            ORDER BY Total DESC
+            LIMIT $count;
+            """;
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("o"));
+        command.Parameters.AddWithValue("$count", count);
+
+        var results = new List<(string, TimeSpan)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add((reader.GetString(0), TimeSpan.FromTicks(reader.GetInt64(1))));
+        }
+        return results;
+    }
+
+    public int GetTotalSampleCountSince(DateTime cutoff)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(SUM(SampleCount), 0) FROM SessionSampleCounts WHERE SessionStartTime >= $cutoff;";
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("o"));
+
+        var result = command.ExecuteScalar();
+        return result is long count ? (int)count : 0;
+    }
+    
+    
     // Keeps the database small — deletes anything older than the cutoff (1 week).
     public void PruneOlderThan(DateTime cutoff)
     {

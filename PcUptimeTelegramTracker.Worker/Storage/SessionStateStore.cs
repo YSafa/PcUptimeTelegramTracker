@@ -2,9 +2,8 @@ using System.Text.Json;
 
 namespace PcUptimeTelegramTracker.Worker.Storage;
 
-// Persists which session we last reported to Telegram, so restarts within
-// the same boot session don't resend the same summary.
-// Uses a plain JSON file under ProgramData — no SQLite needed for a single value.
+// Persists small pieces of state that need to survive service restarts:
+// which session we last reported, and when we last sent a weekly summary.
 public class SessionStateStore
 {
     private readonly string _filePath;
@@ -18,23 +17,39 @@ public class SessionStateStore
         _filePath = Path.Combine(directory, "state.json");
     }
 
-    public DateTime? GetLastReportedSessionEnd()
-    {
-        if (!File.Exists(_filePath)) return null;
-
-        var json = File.ReadAllText(_filePath);
-        var data = JsonSerializer.Deserialize<StateData>(json);
-        return data?.LastReportedSessionEnd;
-    }
+    public DateTime? GetLastReportedSessionEnd() => Load().LastReportedSessionEnd;
 
     public void SetLastReportedSessionEnd(DateTime value)
     {
-        var data = new StateData { LastReportedSessionEnd = value };
+        var data = Load();
+        data.LastReportedSessionEnd = value;
+        Save(data);
+    }
+
+    public DateTime? GetLastWeeklyReportSent() => Load().LastWeeklyReportSent;
+
+    public void SetLastWeeklyReportSent(DateTime value)
+    {
+        var data = Load();
+        data.LastWeeklyReportSent = value;
+        Save(data);
+    }
+
+    private StateData Load()
+    {
+        if (!File.Exists(_filePath)) return new StateData();
+        var json = File.ReadAllText(_filePath);
+        return JsonSerializer.Deserialize<StateData>(json) ?? new StateData();
+    }
+
+    private void Save(StateData data)
+    {
         File.WriteAllText(_filePath, JsonSerializer.Serialize(data));
     }
 
     private class StateData
     {
         public DateTime? LastReportedSessionEnd { get; set; }
+        public DateTime? LastWeeklyReportSent { get; set; }
     }
 }
