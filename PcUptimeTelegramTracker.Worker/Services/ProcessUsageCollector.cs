@@ -30,6 +30,7 @@ public class ProcessUsageCollector
     public void SampleOnce(DateTime sessionStartTime)
     {
         var processes = Process.GetProcesses();
+        var deltas = new List<(string ProcessName, TimeSpan Delta)>();
 
         foreach (var process in processes)
         {
@@ -46,12 +47,9 @@ public class ProcessUsageCollector
                 if (_lastSeenProcessorTime.TryGetValue(process.Id, out var previousTotal))
                 {
                     var delta = currentTotal - previousTotal;
-                    // A negative delta means this PID was reused by a different
-                    // process since our last sample — skip it this round rather
-                    // than corrupting the accumulated total.
                     if (delta > TimeSpan.Zero)
                     {
-                        _repository.AddAppUsage(sessionStartTime, process.ProcessName, delta);
+                        deltas.Add((process.ProcessName, delta));
                     }
                 }
 
@@ -59,16 +57,16 @@ public class ProcessUsageCollector
             }
             catch (Win32Exception)
             {
-                // Access denied for this process — skip silently.
             }
             catch (InvalidOperationException)
             {
-                // Process exited between GetProcesses() and reading its properties.
             }
             finally
             {
                 process.Dispose();
             }
         }
+
+        _repository.AddAppUsageBatch(sessionStartTime, deltas);
     }
 }

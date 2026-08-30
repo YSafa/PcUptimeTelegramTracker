@@ -60,6 +60,8 @@ public class Worker : BackgroundService
             session.StartTime, session.EndTime, session.AwakeDuration, session.SleepDuration, session.EndedCleanly);
 
         var topApps = _usageRepository.GetTopApps(session.StartTime, 5);
+        var sampleCount = _usageRepository.GetSampleCount(session.StartTime);
+        var totalSampledSeconds = sampleCount * 60.0 * Environment.ProcessorCount;
 
         var status = session.EndedCleanly ? "" : " (beklenmedik şekilde sonlandı)";
         var message =
@@ -68,10 +70,14 @@ public class Worker : BackgroundService
             $"(toplam {session.TotalDuration:hh\\:mm\\:ss})\n" +
             $"Uyanık: {session.AwakeDuration:hh\\:mm\\:ss}, Uykuda: {session.SleepDuration:hh\\:mm\\:ss}";
 
-        if (topApps.Count > 0)
+        if (topApps.Count > 0 && totalSampledSeconds > 0)
         {
             message += "\n\nEn çok kaynak tüketen uygulamalar:\n" +
-                string.Join("\n", topApps.Select((app, i) => $"{i + 1}. {app.ProcessName} — {app.CpuTime:hh\\:mm\\:ss}"));
+                       string.Join("\n", topApps.Select((app, i) =>
+                       {
+                           var avgPercent = (app.CpuTime.TotalSeconds / totalSampledSeconds) * 100;
+                           return $"{i + 1}. {app.ProcessName} — {app.CpuTime:hh\\:mm\\:ss} (ort. %{avgPercent:0.0})";
+                       }));
         }
 
         await _telegramNotifier.SendMessageAsync(message, cancellationToken);

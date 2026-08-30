@@ -27,44 +27,84 @@ public class UsageRepository
 
         using var command = connection.CreateCommand();
         command.CommandText = """
-            CREATE TABLE IF NOT EXISTS Sessions (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                StartTime TEXT NOT NULL,
-                EndTime TEXT NOT NULL,
-                AwakeSeconds INTEGER NOT NULL,
-                SleepSeconds INTEGER NOT NULL,
-                EndedCleanly INTEGER NOT NULL
-            );
+                              CREATE TABLE IF NOT EXISTS Sessions (
+                                  Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  StartTime TEXT NOT NULL,
+                                  EndTime TEXT NOT NULL,
+                                  AwakeSeconds INTEGER NOT NULL,
+                                  SleepSeconds INTEGER NOT NULL,
+                                  EndedCleanly INTEGER NOT NULL
+                              );
 
-            CREATE TABLE IF NOT EXISTS AppUsage (
-                SessionStartTime TEXT NOT NULL,
-                ProcessName TEXT NOT NULL,
-                CpuTimeTicks INTEGER NOT NULL,
-                PRIMARY KEY (SessionStartTime, ProcessName)
-            );
-            """;
+                              CREATE TABLE IF NOT EXISTS AppUsage (
+                                  SessionStartTime TEXT NOT NULL,
+                                  ProcessName TEXT NOT NULL,
+                                  CpuTimeTicks INTEGER NOT NULL,
+                                  PRIMARY KEY (SessionStartTime, ProcessName)
+                              );
+
+                              CREATE TABLE IF NOT EXISTS SessionSampleCounts (
+                                  SessionStartTime TEXT PRIMARY KEY,
+                                  SampleCount INTEGER NOT NULL
+                              );
+                              """;
         command.ExecuteNonQuery();
     }
 
-    // Adds `delta` CPU ticks for a process within a session, creating the row
-    // if it doesn't exist yet. Called every ~60s from the sampling loop, so
-    // data survives a crash instead of only being written at session end.
-    public void AddAppUsage(DateTime sessionStartTime, string processName, TimeSpan delta)
+    // Writes an entire sampling round (all process deltas + the sample count
+    // increment) in a single connection + transaction — far cheaper than
+    // opening/closing a connection per process, per minute.
+    public void AddAppUsageBatch(DateTime sessionStartTime, IReadOnlyList<(string ProcessName, TimeSpan Delta)> deltas)
     {
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
+        using var transaction = connection.BeginTransaction();
 
-        using var command = connection.CreateCommand();
-        command.CommandText = """
+        using var upsertAppCommand = connection.CreateCommand();
+        upsertAppCommand.Transaction = transaction;
+        upsertAppCommand.CommandText = """
             INSERT INTO AppUsage (SessionStartTime, ProcessName, CpuTimeTicks)
             VALUES ($sessionStart, $processName, $ticks)
             ON CONFLICT(SessionStartTime, ProcessName)
             DO UPDATE SET CpuTimeTicks = CpuTimeTicks + excluded.CpuTimeTicks;
             """;
+        var sessionStartParam = upsertAppCommand.Parameters.Add("$sessionStart", SqliteType.Text);
+        var processNameParam = upsertAppCommand.Parameters.Add("$processName", SqliteType.Text);
+        var ticksParam = upsertAppCommand.Parameters.Add("$ticks", SqliteType.Integer);
+
+        var sessionStartText = sessionStartTime.ToString("o");
+        foreach (var (processName, delta) in deltas)
+        {
+            sessionStartParam.Value = sessionStartText;
+            processNameParam.Value = processName;
+            ticksParam.Value = delta.Ticks;
+            upsertAppCommand.ExecuteNonQuery();
+        }
+
+        using var sampleCountCommand = connection.CreateCommand();
+        sampleCountCommand.Transaction = transaction;
+        sampleCountCommand.CommandText = """
+            INSERT INTO SessionSampleCounts (SessionStartTime, SampleCount)
+            VALUES ($sessionStart, 1)
+            ON CONFLICT(SessionStartTime) DO UPDATE SET SampleCount = SampleCount + 1;
+            """;
+        sampleCountCommand.Parameters.AddWithValue("$sessionStart", sessionStartText);
+        sampleCountCommand.ExecuteNonQuery();
+
+        transaction.Commit();
+    }
+
+    public int GetSampleCount(DateTime sessionStartTime)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT SampleCount FROM SessionSampleCounts WHERE SessionStartTime = $sessionStart;";
         command.Parameters.AddWithValue("$sessionStart", sessionStartTime.ToString("o"));
-        command.Parameters.AddWithValue("$processName", processName);
-        command.Parameters.AddWithValue("$ticks", delta.Ticks);
-        command.ExecuteNonQuery();
+
+        var result = command.ExecuteScalar();
+        return result is long count ? (int)count : 0;
     }
 
     public List<(string ProcessName, TimeSpan CpuTime)> GetTopApps(DateTime sessionStartTime, int count)
