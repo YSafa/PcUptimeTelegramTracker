@@ -7,6 +7,9 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddSingleton<UptimeTrackerService>();
 builder.Services.AddSingleton<SessionStateStore>();
+builder.Services.AddSingleton<ProcessUsageCollector>();
+builder.Services.AddSingleton<UsageRepository>();
+builder.Services.AddSingleton<ProcessUsageCollector>();
 
 // appsettings.Local.json overrides values in appsettings.json.
 // This file is in .gitignore, so it never gets committed — only exists locally.

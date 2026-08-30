@@ -234,6 +234,20 @@ public class UptimeTrackerService : IDisposable
         };
     }
 
+    // The start time of the boot we're currently running under — used to tag
+    // live process-usage samples so they can be matched to this session later.
+    public DateTime GetCurrentSessionStartTime()
+    {
+        var lookbackStart = DateTime.Now.AddDays(-30);
+        var events = ReadEventsSince(lookbackStart).ToList();
+
+        for (var i = events.Count - 1; i >= 0; i--)
+        {
+            if (events[i].EventId == 27) return events[i].Timestamp;
+        }
+
+        return DateTime.Now; // fallback, shouldn't normally happen
+    }
     public void Dispose()
     {
         _watcher?.Dispose();

@@ -7,17 +7,23 @@ public class Worker : BackgroundService
     private readonly TelegramNotifier _telegramNotifier;
     private readonly UptimeTrackerService _uptimeTracker;
     private readonly SessionStateStore _sessionStateStore;
+    private readonly ProcessUsageCollector _processUsageCollector;
+    private readonly UsageRepository _usageRepository;
 
     public Worker(
         ILogger<Worker> logger,
         TelegramNotifier telegramNotifier,
         UptimeTrackerService uptimeTracker,
-        SessionStateStore sessionStateStore)
+        SessionStateStore sessionStateStore,
+        ProcessUsageCollector processUsageCollector,
+        UsageRepository usageRepository)
     {
         _logger = logger;
         _telegramNotifier = telegramNotifier;
         _uptimeTracker = uptimeTracker;
         _sessionStateStore = sessionStateStore;
+        _processUsageCollector = processUsageCollector;
+        _usageRepository = usageRepository;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -26,10 +32,17 @@ public class Worker : BackgroundService
 
         _uptimeTracker.LoadTodaysHistory();
         _uptimeTracker.StartLiveWatching();
+        _usageRepository.PruneOlderThan(DateTime.Now.AddDays(-7));
 
         await ReportPreviousSessionIfNeeded(stoppingToken);
 
-        await Task.Delay(Timeout.Infinite, stoppingToken);
+        var currentSessionStart = _uptimeTracker.GetCurrentSessionStartTime();
+
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            _processUsageCollector.SampleOnce(currentSessionStart);
+        }
     }
 
     private async Task ReportPreviousSessionIfNeeded(CancellationToken cancellationToken)
@@ -43,12 +56,23 @@ public class Worker : BackgroundService
             return;
         }
 
+        _usageRepository.SaveSession(
+            session.StartTime, session.EndTime, session.AwakeDuration, session.SleepDuration, session.EndedCleanly);
+
+        var topApps = _usageRepository.GetTopApps(session.StartTime, 5);
+
         var status = session.EndedCleanly ? "" : " (beklenmedik şekilde sonlandı)";
         var message =
             $"Önceki oturum{status}\n" +
             $"{session.StartTime:dd.MM.yyyy HH:mm:ss} - {session.EndTime:dd.MM.yyyy HH:mm:ss} arası açık kaldı " +
             $"(toplam {session.TotalDuration:hh\\:mm\\:ss})\n" +
             $"Uyanık: {session.AwakeDuration:hh\\:mm\\:ss}, Uykuda: {session.SleepDuration:hh\\:mm\\:ss}";
+
+        if (topApps.Count > 0)
+        {
+            message += "\n\nEn çok kaynak tüketen uygulamalar:\n" +
+                string.Join("\n", topApps.Select((app, i) => $"{i + 1}. {app.ProcessName} — {app.CpuTime:hh\\:mm\\:ss}"));
+        }
 
         await _telegramNotifier.SendMessageAsync(message, cancellationToken);
         _sessionStateStore.SetLastReportedSessionEnd(session.EndTime);
