@@ -31,32 +31,44 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("PcUptimeTelegramTracker başlatıldı.");
-
-        _uptimeTracker.LoadTodaysHistory();
-        _uptimeTracker.StartLiveWatching();
-        _usageRepository.PruneOlderThan(DateTime.Now.AddDays(-7));
-
-        await ReportPreviousSessionIfNeeded(stoppingToken);
-        await _weeklyReportService.SendIfDueAsync(stoppingToken);
-
-        var currentSessionStart = _uptimeTracker.GetCurrentSessionStartTime();
-
-        var minuteCounter = 0;
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        try
         {
-            _processUsageCollector.SampleOnce(currentSessionStart);
+            _logger.LogInformation("PcUptimeTelegramTracker başlatıldı.");
 
-            // Check the weekly report once a day (every 1440th minute tick)
-            // instead of every minute — the check itself is cheap, but no
-            // need to hit the DB/state file that often.
-            minuteCounter++;
-            if (minuteCounter >= 1440)
+            _uptimeTracker.LoadTodaysHistory();
+            _uptimeTracker.StartLiveWatching();
+            _usageRepository.PruneOlderThan(DateTime.Now.AddDays(-7));
+
+            await ReportPreviousSessionIfNeeded(stoppingToken);
+            await _weeklyReportService.SendIfDueAsync(stoppingToken);
+
+            var currentSessionStart = _uptimeTracker.GetCurrentSessionStartTime();
+
+            var minuteCounter = 0;
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                minuteCounter = 0;
-                await _weeklyReportService.SendIfDueAsync(stoppingToken);
+                _processUsageCollector.SampleOnce(currentSessionStart);
+
+                minuteCounter++;
+                if (minuteCounter >= 1440)
+                {
+                    minuteCounter = 0;
+                    await _weeklyReportService.SendIfDueAsync(stoppingToken);
+                }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown (service stop requested) — not an error.
+            _logger.LogInformation("Servis normal şekilde durduruluyor.");
+        }
+        catch (Exception ex)
+        {
+            // Anything else is unexpected — log the full exception before the
+            // service dies, so we're never blind to a crash again.
+            _logger.LogCritical(ex, "Servis beklenmedik bir hata nedeniyle çöktü.");
+            throw;
         }
     }
 
