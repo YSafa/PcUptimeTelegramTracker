@@ -97,7 +97,10 @@ public class Worker : BackgroundService
                        }));
         }
 
-        await _telegramNotifier.SendMessageAsync(message, cancellationToken);
-        _sessionStateStore.SetLastReportedSessionEnd(session.EndTime);
+        var sent = await _telegramNotifier.SendMessageWithRetryAsync(message, cancellationToken: cancellationToken);
+        if (sent)
+        {
+            _sessionStateStore.SetLastReportedSessionEnd(session.EndTime);
+        }
     }
 }

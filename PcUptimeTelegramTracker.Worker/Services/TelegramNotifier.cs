@@ -17,17 +17,41 @@ public class TelegramNotifier
         _logger = logger;
     }
 
-    public async Task SendMessageAsync(string message, CancellationToken cancellationToken = default)
+    public async Task<bool> SendMessageAsync(string message, CancellationToken cancellationToken = default)
     {
         try
         {
             await _client.SendMessage(chatId: _chatId, text: message, cancellationToken: cancellationToken);
             _logger.LogInformation("Telegram mesajı gönderildi.");
+            return true;
         }
         catch (Exception ex)
         {
-            // Network issues or an invalid token/chat id shouldn't crash the whole service.
             _logger.LogError(ex, "Telegram mesajı gönderilirken hata oluştu.");
+            return false;
         }
     }
+    
+    public async Task<bool> SendMessageWithRetryAsync(
+        string message, int maxAttempts = 5, TimeSpan? delayBetweenAttempts = null, CancellationToken cancellationToken = default)
+    {
+        delayBetweenAttempts ??= TimeSpan.FromSeconds(20);
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var sent = await SendMessageAsync(message, cancellationToken);
+            if (sent) return true;
+
+            if (attempt < maxAttempts)
+            {
+                _logger.LogWarning("Gönderim denemesi {Attempt}/{Max} başarısız, {Delay} sonra tekrar denenecek.",
+                    attempt, maxAttempts, delayBetweenAttempts.Value);
+                await Task.Delay(delayBetweenAttempts.Value, cancellationToken);
+            }
+        }
+
+        _logger.LogError("Tüm gönderim denemeleri başarısız oldu.");
+        return false;
+    }
+    
 }

@@ -26,6 +26,11 @@ builder.Services.AddWindowsService(options =>
     options.ServiceName = "PcUptimeTelegramTracker";
 });
 
+builder.Logging.AddEventLog(settings =>
+{
+    settings.SourceName = "PcUptimeTelegramTracker";
+});
+
 // Currently registers an empty Worker; EventLogWatcher, TelegramNotifier etc.
 // will be added here later via AddSingleton/AddHostedService.
 builder.Services.AddHostedService<Worker>();
