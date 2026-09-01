@@ -32,7 +32,10 @@ if ($existingService) {
 }
 
 Write-Host "Creating service..."
-sc.exe create $serviceName binPath= "$publishPath\PcUptimeTelegramTracker.Worker.exe" start= auto
+sc.exe create $serviceName binPath= "$publishPath\PcUptimeTelegramTracker.Worker.exe" start= delayed-auto
+
+Write-Host "Configuring automatic restart on failure..."
+sc.exe failure $serviceName reset= 86400 actions= restart/60000/restart/120000/restart/300000
 
 Write-Host "Starting service..."
 Start-Service $serviceName

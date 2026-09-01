@@ -7,16 +7,19 @@ A lightweight Windows Service that tracks how long your PC stays on (and how lon
 - **Accurate uptime tracking**, even with Windows Fast Startup enabled (uses `Kernel-Boot` Event ID 27 and `User32` Event ID 1074 instead of the unreliable `EventLog` 6005/6006 pair).
 - **Event-driven, not polling** — subscribes to the Windows Event Log via `EventLogWatcher`, so it consumes virtually no CPU while idle.
 - **Per-session Telegram summary**, sent automatically on the next startup after a shutdown/restart (no reliance on catching the shutdown moment itself, which is unreliable due to how little time Windows gives a service to act during shutdown).
+- **Fast Startup–aware**: also reacts to a live boot event, since Fast Startup can resume the service's existing process from hibernation instead of actually restarting it.
 - **Top 5 resource-heavy apps** per session, based on lightweight periodic CPU sampling (every 60 seconds).
 - **Weekly summary report**, aggregating the past 7 days of sessions and app usage.
+- **Auto-restarts on crash**, and logs unexpected failures to the Windows Event Log for visibility.
 - Local SQLite storage — no external database server required.
 
 ## How it works
 
 1. On startup, the service reads the Windows Event Log to reconstruct the previous session's timeline (start time, end time, awake/asleep duration) — even if the service itself wasn't running during part of that session.
 2. It sends a Telegram message summarizing that session, then starts a live `EventLogWatcher` subscription to track the current session going forward.
-3. Every 60 seconds, it samples running processes and accumulates CPU time per process name into a local SQLite database.
-4. Once a day, it checks whether 7 days have passed since the last weekly report and sends one if due.
+3. **Fast Startup handling**: closing/reopening the PC with Fast Startup enabled resumes this exact service process from hibernation instead of restarting it — so the service also listens for a live boot event and re-checks for a session to report, rather than relying only on process startup.
+4. Every 60 seconds, it samples running processes and accumulates CPU time per process name into a local SQLite database.
+5. Once a day, it checks whether 7 days have passed since the last weekly report and sends one if due.
 
 ## Requirements
 
@@ -56,7 +59,7 @@ Run the included script from an **Administrator** PowerShell prompt, from the re
 .\install-service.ps1
 ```
 
-This publishes the project in Release mode, copies your local config into the publish folder, and registers/starts the service (auto-start on boot).
+This publishes the project in Release mode, copies your local config into the publish folder, registers the service with delayed auto-start, configures it to automatically restart on crash, and starts it.
 
 Alternatively, do it manually:
 
@@ -65,7 +68,8 @@ dotnet publish PcUptimeTelegramTracker.Worker -c Release -r win-x64 --self-conta
 
 # copy appsettings.Local.json into C:\Services\PcUptimeTelegramTracker manually
 
-sc.exe create PcUptimeTelegramTracker binPath= "C:\Services\PcUptimeTelegramTracker\PcUptimeTelegramTracker.Worker.exe" start= auto
+sc.exe create PcUptimeTelegramTracker binPath= "C:\Services\PcUptimeTelegramTracker\PcUptimeTelegramTracker.Worker.exe" start= delayed-auto
+sc.exe failure PcUptimeTelegramTracker reset= 86400 actions= restart/60000/restart/120000/restart/300000
 Start-Service PcUptimeTelegramTracker
 ```
 
@@ -74,6 +78,20 @@ Start-Service PcUptimeTelegramTracker
 ```powershell
 Stop-Service PcUptimeTelegramTracker
 sc.exe delete PcUptimeTelegramTracker
+```
+
+## Troubleshooting
+
+If the Telegram message doesn't arrive after a restart, check the Windows Event Viewer:
+
+1. Open **Event Viewer** → **Windows Logs** → **Application**.
+2. Filter by source `PcUptimeTelegramTracker` to see the service's own logs.
+3. Also check **Windows Logs** → **System**, filtered to source `Service Control Manager`, to see whether Windows actually started/stopped the service.
+
+You can also query both via PowerShell:
+
+```powershell
+Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='PcUptimeTelegramTracker'; StartTime=(Get-Date).AddDays(-1)} | Select-Object TimeCreated, Id, LevelDisplayName, Message | Format-List
 ```
 
 ## Tech stack
