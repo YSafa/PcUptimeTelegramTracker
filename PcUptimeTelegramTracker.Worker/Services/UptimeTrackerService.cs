@@ -40,6 +40,16 @@ public class UptimeTrackerService : IDisposable
 
     private PowerState _currentState = PowerState.Unknown;
     private DateTime _lastTransitionTime;
+    
+    
+    // Raised when a new boot (Event 27) is observed WHILE this process is
+    // already running — this happens with Fast Startup, where the service
+    // process survives shutdown/startup as a hibernated-and-resumed Session 0
+    // process instead of actually restarting. We use this to manually trigger
+    // the "check for a session to report" logic that would normally only run
+    // once at process startup.
+    public event Action<DateTime>? BootDetected;
+    
     private EventLogWatcher? _watcher;
 
     public UptimeTrackerService(ILogger<UptimeTrackerService> logger)
@@ -87,7 +97,13 @@ public class UptimeTrackerService : IDisposable
 
         var timestamp = e.EventRecord.TimeCreated ?? DateTime.Now;
         var eventId = e.EventRecord.Id;
+
         ApplyTransition(timestamp, eventId);
+
+        if (eventId == 27)
+        {
+            BootDetected?.Invoke(timestamp);
+        }
     }
 
     private void ApplyTransition(DateTime timestamp, int eventId)

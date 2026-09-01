@@ -44,6 +44,23 @@ public class Worker : BackgroundService
 
             var currentSessionStart = _uptimeTracker.GetCurrentSessionStartTime();
 
+            // Fast Startup can resume this exact process across a shutdown/startup
+            // cycle instead of restarting it — so we also react to a live boot
+            // detection, not just to the one-time startup logic above.
+            _uptimeTracker.BootDetected += async (timestamp) =>
+            {
+                try
+                {
+                    _logger.LogInformation("Canlı açılış tespit edildi (muhtemelen Hızlı Başlatma sonrası devam eden süreç).");
+                    await ReportPreviousSessionIfNeeded(stoppingToken);
+                    currentSessionStart = timestamp;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Canlı açılış sonrası oturum raporlama hatası.");
+                }
+            };
+
             var minuteCounter = 0;
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
             while (await timer.WaitForNextTickAsync(stoppingToken))
@@ -60,13 +77,10 @@ public class Worker : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            // Normal shutdown (service stop requested) — not an error.
             _logger.LogInformation("Servis normal şekilde durduruluyor.");
         }
         catch (Exception ex)
         {
-            // Anything else is unexpected — log the full exception before the
-            // service dies, so we're never blind to a crash again.
             _logger.LogCritical(ex, "Servis beklenmedik bir hata nedeniyle çöktü.");
             throw;
         }
