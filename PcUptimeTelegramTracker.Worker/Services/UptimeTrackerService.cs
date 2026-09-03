@@ -223,7 +223,7 @@ public class UptimeTrackerService : IDisposable
         for (var i = startIndex; i < currentBootIndex; i++)
         {
             var (timestamp, eventId) = events[i];
-            if (eventId is not (42 or 1)) continue;
+            if (eventId is not (42 or 1 or 27)) continue;
 
             var elapsed = timestamp - lastTime;
             if (elapsed > TimeSpan.Zero)
