@@ -77,6 +77,20 @@ public class WeeklyReportService
                            return $"{i + 1}. {app.ProcessName} — {DurationFormatter.Format(app.CpuTime)} (ort. %{avgPercent:0.0})";
                        }));
         }
+        
+        var sessions = _usageRepository.GetSessionsSince(cutoff);
+        var dailyTotals = sessions
+            .GroupBy(s => s.StartTime.Date)
+            .OrderBy(g => g.Key)
+            .Select(g => (Date: g.Key, Total: g.Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Awake + s.Sleep)))
+            .ToList();
+
+        if (dailyTotals.Count > 0)
+        {
+            message += "\n\n📅 Günlük dağılım:\n" +
+                       string.Join("\n", dailyTotals.Select(d => $"{d.Date:dd.MM.yyyy} — {DurationFormatter.Format(d.Total)}"));
+        }
+        
 
         await _telegramNotifier.SendMessageAsync(message, cancellationToken);
         _stateStore.SetLastWeeklyReportSent(DateTime.Now);

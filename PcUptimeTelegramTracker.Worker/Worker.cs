@@ -68,7 +68,7 @@ public class Worker : BackgroundService
                 _processUsageCollector.SampleOnce(currentSessionStart);
 
                 minuteCounter++;
-                if (minuteCounter >= 1440)
+                if (minuteCounter >= 60)
                 {
                     minuteCounter = 0;
                     await _weeklyReportService.SendIfDueAsync(stoppingToken);

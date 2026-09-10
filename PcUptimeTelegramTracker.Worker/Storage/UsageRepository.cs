@@ -227,4 +227,33 @@ public class UsageRepository
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("o"));
         command.ExecuteNonQuery();
     }
+    
+    public List<(DateTime StartTime, DateTime EndTime, TimeSpan Awake, TimeSpan Sleep)> GetSessionsSince(DateTime cutoff)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT StartTime, EndTime, AwakeSeconds, SleepSeconds
+                              FROM Sessions
+                              WHERE StartTime >= $cutoff
+                              ORDER BY StartTime;
+                              """;
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("o"));
+
+        var results = new List<(DateTime, DateTime, TimeSpan, TimeSpan)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var startTime = DateTime.Parse(reader.GetString(0), null, System.Globalization.DateTimeStyles.RoundtripKind);
+            var endTime = DateTime.Parse(reader.GetString(1), null, System.Globalization.DateTimeStyles.RoundtripKind);
+            var awake = TimeSpan.FromSeconds(reader.GetInt64(2));
+            var sleep = TimeSpan.FromSeconds(reader.GetInt64(3));
+            results.Add((startTime, endTime, awake, sleep));
+        }
+        return results;
+    }
+    
+    
 }
