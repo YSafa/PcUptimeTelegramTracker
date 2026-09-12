@@ -30,6 +30,7 @@ public class UptimeTrackerService : IDisposable
     {
         (42, "Microsoft-Windows-Kernel-Power"),
         (1, "Microsoft-Windows-Kernel-Power"),
+        (1, "Microsoft-Windows-Power-Troubleshooter"),
         (41, "Microsoft-Windows-Kernel-Power"),
         (27, "Microsoft-Windows-Kernel-Boot"),
         (1074, "USER32")
